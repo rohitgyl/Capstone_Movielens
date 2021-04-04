@@ -499,6 +499,6 @@ final_model_remse_validationset %>%  knitr::kable(col.names = c("Final Model RMS
 
 ## 4.1 Limitations and future work
 
-* The model can be improved to predict ratings for a user or movie  which is not present in training data set. 
+* The model could be enhanced to recommend better ratings for cases where a user or a movie is not present in the training data set. For this project we specifically ensured that validation set did not have such cases. 
 * The final proposed model did not include rating frequency even though it was identified as an informative factor during data exploration. This could be analysed further. 
 * Other matrix based machine learning techniques such as Principal component analysis can also be explored to see if they can help build better models.  
