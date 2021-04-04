@@ -17,7 +17,7 @@ The "movielens" dataset (https://grouplens.org/datasets/movielens/10m/) will be 
 ## 1.3 Summary of Steps
 
 * Prepare the the movielens data set for analysis
-* Split the dataset into 2 parts - training set (to build the recommendation model) and validation set (to check the performnce of model)
+* Split the dataset into 2 parts - training set (to build the recommendation model) and validation set (to check the performance of model)
 * Explore the dataset to identify trends that will form the basis for building the model
 * Incrementally build the recommendation model
 * Assess performance of the final model on the validation dataset
@@ -190,7 +190,7 @@ edx %>% group_by(movieId) %>% summarise(no_of_ratings = n()) %>%
 
 ```
 
-* The most frequently given ratings are checked and it is found that majority 4 and 3 are the most top most given ratings. Whole number ratings are given more than fractional ratings. 
+* The most frequently given ratings are checked and it is found that 4 and 3 are the top most given ratings. Whole number ratings are given more than fractional ratings. 
 
 ```{r Top10-Rated-Ratings, echo=FALSE,message=FALSE,warning=FALSE}
 # Top 10 most given rating
@@ -388,7 +388,7 @@ rmse_results <- bind_rows(rmse_results,
 rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
 ```
 
-* **Model 5** - As a final enhancement to the  model, regularization technique is applied and the tuning paramter lambda is calculated. A plot of RMSE for different values of lambda is shown below and a minimum is achieved for a value of 4.75. The RMSE for our final model is 0.8649406,  a good benefit achieved with regularization as shown in the table of RMSE for our incremental models.  
+* **Model 5** - As a final enhancement to the  model, regularization technique is applied and the tuning parameter lambda is calculated. A plot of RMSE for different values of lambda is shown below and a minimum is achieved for a value of 4.75. The RMSE for our final model is 0.8649406,  a good benefit achieved with regularization as shown in the table of RMSE for our incremental models.  
 
 
 
@@ -445,7 +445,7 @@ rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
 
 ```
 
-* Before checking the performance on Validation dataset, the final model is now retrained on the entire Training set using the chosen lambda. This because the Training set had been split into further subsets thus far during model development.
+* Before checking the performance on Validation dataset, the final model is now retrained on the entire Training set using the chosen lambda. This is because the Training set had been split into further subsets thus far during model development.
 
 ```{r Model-5-FullTrainData, echo=FALSE,message=FALSE,warning=FALSE}
 ## generate final model with chosen lambda but using full training set i.e. edx set
