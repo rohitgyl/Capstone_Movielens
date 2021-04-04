@@ -1,0 +1,504 @@
+---
+title: "Movie Recommendation Capstone Project"
+author: "Rohit Goyal"
+date: "4/4/2021"
+output: pdf_document
+---
+
+# 1. Introduction
+
+## 1.1 Objective 
+The objective of this project is to develop a movie recommendation model that will predict a rating for a given user and movie combination. Movie Recommendation models are used in online video streaming platforms such as Netflix and Amazon Prime Video to provide relevant suggestions to customers. 
+
+## 1.2 Dataset Used 
+
+The "movielens" dataset (https://grouplens.org/datasets/movielens/10m/) will be used to build the recommendation model using machine learning. The dataset contains 10 million movie rating records and was released in 2009. Along with **rating** given by a user for a **movie**, the data set also contains the **timestamp** of when a rating was given as well as the **genres** tagged to a particular movie. 
+
+## 1.3 Summary of Steps
+
+* Prepare the the movielens data set for analysis
+* Split the dataset into 2 parts - training set (to build the recommendation model) and validation set (to check the performnce of model)
+* Explore the dataset to identify trends that will form the basis for building the model
+* Incrementally build the recommendation model
+* Assess performance of the final model on the validation dataset
+
+# 2. Detailed Analysis of Steps 
+
+## 2.1 Data Preparation
+
+```{r setup, include=FALSE}
+######################################################################
+# Important Note:
+# This code is written using R v 4.0 on Mac
+# Running R markdown could sometimes take really long - upto 30 minutes in some runs
+# Especially slow while running data download
+# The code in this R markdown is same as that in provided R code file. 
+######################################################################
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(out.width = "50%")
+knitr::opts_chunk$set(out.height  = "50%")
+
+# Install the required packages
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(dplyr)) install.packages("ggplot2")
+if(!require(dplyr)) install.packages("stringr")
+if(!require(dplyr)) install.packages("readr")
+if(!require(dplyr)) install.packages("tidyr")
+if(!require(dplyr)) install.packages("lubridate")
+if(!require(dplyr)) install.packages("tidyr")
+if(!require(dplyr)) install.packages("knitr")
+
+# load libraries
+library(tidyverse)
+library(caret)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(tidyr)
+library(lubridate)
+library(knitr)
+```
+
+* The first step is to download the movielens data set zip file from the website. Once downloaded, the ratings and movie info data are read from 2 separate files.
+
+```{r Data-Download,echo=FALSE,message=FALSE,warning=FALSE}
+##########################################################
+# Data Download and reading of files 
+##########################################################
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+# Download the zip file
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+# Read ratings file
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+# Read movies file
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 4.0 or later: format the column data types
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+```
+
+* The ratings and movie info data is then combined together to get the movielens data set. This dataset is then split into 2 parts.
+
+1. 90% as training set (to build the model) 
+2. Remaining 10% as validation set (to test our final model).
+
+* It is further ensured that users and movies in validation set are present in the training set. 
+
+```{r Dataset-Prep, echo=FALSE,message=FALSE,warning=FALSE}
+##########################################################
+# Create edx set (which will be used for model building)
+# validation set (final hold-out test set)
+# 
+##########################################################
+
+# Join ratings and movie data sets
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+# remove unwanted variables
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+* Next, the year in which a rating was given is derived from the timestamp attribute.  
+
+```{r Get-Rating-Year, echo=FALSE,message=FALSE,warning=FALSE}
+##########################################################
+# Transform datetimestamp attribute and extract year of rating
+##########################################################
+
+# derive year in which the rating was given and store as new attribute called rate_year
+edx <- edx %>% mutate(rate_year =year(as_datetime(timestamp)))
+
+
+```
+
+
+## 2.2 Data Exploration and Visualization
+
+* The data is now ready for initial exploration. Here is a snippet of the prepared data. 
+
+```{r Sample-Data, echo=FALSE}
+# Check sample data to inspect data attributes
+head(edx) %>% knitr::kable("simple")
+```
+
+* The dimesion of dataset (rows, columns) and the total distinct users and movies are as follows:
+
+```{r Data-Dimensions, echo=FALSE}
+# dimension of dataset
+dim(edx) %>% knitr::kable(col.names = "Dimensions: rows, columns","simple")
+
+# distinct users and movies
+edx %>%
+  summarize(distinct_users = n_distinct(userId),distinct_movies = n_distinct(movieId)) %>% knitr::kable("simple")
+```
+
+* The top 10 movies with highest number of ratings are shown below and as expected these are popular and well recognized movies. 
+
+```{r Top10-Rated-Movies, echo=FALSE,message=FALSE,warning=FALSE}
+# Top 10 most rated movies - find top 10 movieId and then join with a distinct set of movieId and title
+top_movieId <- edx %>% group_by(movieId) %>% summarise(no_of_ratings=n()) %>%arrange(desc(no_of_ratings)) %>%
+  top_n(10)
+
+movie_title <- edx %>% distinct(movieId,title)
+
+top_movieId %>% inner_join(movie_title,by="movieId") %>%
+  knitr::kable("simple")
+```
+
+* A frequency distribution of no of ratings by movie is plotted (log scale) and we see that majority of the movies have very low number of ratings. Only the popular movies tend to attract ratings in large numbers. 
+
+```{r Distribution-no-of-Ratings, echo=FALSE,message=FALSE,warning=FALSE}
+# Distribution of no of ratings given by Movie
+edx %>% group_by(movieId) %>% summarise(no_of_ratings = n()) %>% 
+  ggplot(aes(no_of_ratings)) + 
+  geom_histogram(bins = 30, color = "black") + 
+  scale_x_log10() + 
+  ggtitle("Distribution of No. of Ratings by Movie")
+
+
+```
+
+* The most frequently given ratings are checked and it is found that majority 4 and 3 are the most top most given ratings. Whole number ratings are given more than fractional ratings. 
+
+```{r Top10-Rated-Ratings, echo=FALSE,message=FALSE,warning=FALSE}
+# Top 10 most given rating
+edx %>% group_by(rating) %>% summarise(rating_count=n()) %>% arrange(desc(rating_count))%>% top_n(10)%>%
+  knitr::kable("simple")
+```
+
+* The top 10 genres with most number of ratings show that Drama and Comedy movies are the most rated ones.
+```{r Top10-Rated-Genres, echo=FALSE,message=FALSE,warning=FALSE}
+edx %>% group_by(genres) %>% summarise(genres_count=n()) %>%arrange(desc(genres_count)) %>% top_n(10)%>% knitr::kable("simple")
+```
+
+* Avg Rating variability by different attributes are expolored and following observations are made - These form the basis of subsequent model development by provding potential factors that are important to prediction of ratings for a given user and movie. 
+1. **By Movie** - There is sufficient variability by movie as expected. The no of movies falls progressively as one moves towards the tails (i.e. <3 and >4) of the distribution. 
+2. **By Users** - Again as common sense would dictate, users have unique preferences and rating styles and therefore good variability observed across users - from very picky users to very generous users.
+3. **By Genres** - Some genres tend to  attract better ratings than others as observed. E.g. Drama movies have higher average ratings while horror movies get lower average ratings. 
+4. **By ratings per year** - While there is no clear trend for movies which are not rated frequently, the consensus starts to emerge for movies which are rated more frequently. 
+
+```{r Avg-Rating-Trends, echo=FALSE,message=FALSE,warning=FALSE}
+
+# Distribution of Avg rating by Movie 
+  edx %>% 
+    group_by(movieId) %>% 
+    summarize(avg_rating = mean(rating)) %>% 
+    ##filter(n()>=100) %>%
+    ggplot(aes(avg_rating)) + 
+    geom_histogram(bins = 30, color = "black")+ 
+    ggtitle("Distribution of  Avg Rating by Movie")
+  
+# Distribution of Avg rating by Users 
+edx %>% 
+  group_by(userId) %>% 
+  summarize(avg_rating = mean(rating)) %>% 
+  ggplot(aes(avg_rating)) + 
+  geom_histogram(bins = 30, color = "black")+ 
+  ggtitle("Distribution of Avg Rating by User")
+
+# Plot Avg rating trend vs Genres
+# filter genres having atleast 50000 ratings to analyse trend of most frequently rated genres.
+edx %>% group_by(genres) %>% summarize(n = n(), avg = mean(rating), se = sd(rating)/sqrt(n())) %>%
+  filter(n >= 50000) %>% 
+  mutate(genres = reorder(genres, avg)) %>%
+  ggplot(aes(x = genres, y = avg, ymin = avg - 2*se, ymax = avg + 2*se)) + 
+  geom_point() +
+  geom_errorbar() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  ggtitle("Avg Rating Trend vs Genres")
+
+
+# Plot Avg rating trend vs ratings per year
+  edx %>% group_by(movieId) %>% summarise(cnt = n(), avg_rating = mean(rating), years =max(rate_year)-min(rate_year)+1)%>%
+  mutate(ratings_per_year = cnt/years) %>% 
+  ggplot(aes(ratings_per_year,avg_rating)) + 
+  geom_point()+
+  geom_smooth()+
+  ggtitle("Avg Rating vs Ratings per year")
+  
+```
+
+## 2.3 Incremental Model Development 
+
+* The training set is first further split into training and test data sets for model development. 
+* RMSE function will be used to check model performance
+
+```{r Model-Split-Data, echo=FALSE,message=FALSE,warning=FALSE}
+
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+
+# split edx data set further into 20% for test and 80% for training
+test_index_edx <- createDataPartition(y = edx$rating, times = 1, p = 0.2, list = FALSE)
+edx_train <- edx[-test_index_edx,]
+edx_test <- edx[test_index_edx,]
+
+#  Make sure userId and movieId in edx_test set are also in edx_train set
+edx_test <- edx_test %>% 
+  semi_join(edx_train, by = "movieId") %>%
+  semi_join(edx_train, by = "userId")
+
+# define RMSE function for evaluation of proposed model
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+```
+
+* **Model 1** -  Use simple avg rating of all movies across all users. As expected this simplistic model does not give a great performance.  
+
+```{r Model-1, echo=FALSE,message=FALSE,warning=FALSE}
+####################################################################################
+# Modeling 1 - use simple avg of all ratings
+####################################################################################
+
+# calculate mean of all ratings in training set
+mu <- mean(edx_train$rating)
+
+# calculate RMSE for test set
+model_1_rmse <- RMSE(edx_test$rating, mu)
+
+# Add model results to the table
+rmse_results <- data_frame(method = "Simple average", RMSE = model_1_rmse)
+
+rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
+```
+
+* **Model 2** - In this increment, the movie effect is added to the model. As expected, an improvement is seen in performance. 
+
+```{r Model-2, echo=FALSE,message=FALSE,warning=FALSE}
+####################################################################################
+# Modeling 2 - Movie effect added
+####################################################################################
+# calculate mean of all ratings in training set
+mu <- mean(edx_train$rating) 
+
+# calculate movie effect term
+movie_avgs <- edx_train %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+
+# calculate predicted ratings of test set 
+predicted_ratings <- mu + edx_test %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  .$b_i
+
+# calcluate RMSE for model with movie effect
+model_2_rmse <- RMSE( edx_test$rating,predicted_ratings)
+
+# Add model results to the table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie Effect Model",
+                                     RMSE = model_2_rmse ))
+rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
+
+```
+
+* **Model 3** - In this increment, the user effect is added to the model. Again, this improves the model further as seen by reduction in RMSE. 
+
+```{r Model-3, echo=FALSE,message=FALSE,warning=FALSE}
+####################################################################################
+# Modeling 3 - User effect added
+####################################################################################
+
+# calculate user effect term
+user_avgs <- edx_train %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+# calculate predicted ratings of test set 
+predicted_ratings <- edx_test %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+
+# calcluate RMSE for model with user effect added
+model_3_rmse <- RMSE(edx_test$rating,predicted_ratings)
+
+# Add model results to the table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User Effects Model",  
+                                     RMSE = model_3_rmse ))
+rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
+```
+
+* **Model 4** - In this increment, the genres effect is added to the model. This improves the model even further as seen by reduction in RMSE. Though the improvement is not as much as seen in earlier model increments.
+
+```{r Model-4, echo=FALSE,message=FALSE,warning=FALSE}
+
+####################################################################################
+# Modeling 4 - genres effect added
+####################################################################################
+
+# calculate genres effect term
+genre_avgs <- edx_train %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  group_by(genres) %>%
+  summarize(b_g = mean(rating - mu - b_i-b_u))
+
+# calculate predicted ratings of test set 
+predicted_ratings <- edx_test %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(genre_avgs, by='genres') %>%
+  mutate(pred = mu + b_i + b_u + b_g) %>%
+  .$pred
+
+# calcluate RMSE for model with genres effect added
+model_4_rmse <- RMSE(edx_test$rating,predicted_ratings)
+
+# Add model results to the table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User+ Genres Effects Model",  
+                                     RMSE = model_4_rmse ))
+rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
+```
+
+* **Model 5** - As a final enhancement to the  model, regularization technique is applied and the tuning paramter lambda is calculated. A plot of RMSE for different values of lambda is shown below and a minimum is achieved for a value of 4.75. The RMSE for our final model is 0.8649406,  a good benefit achieved with regularization as shown in the table of RMSE for our incremental models.  
+
+
+
+```{r Model-5-lambda, echo=FALSE,message=FALSE,warning=FALSE}
+####################################################################################
+# Modeling 5 - Apply regularization technique
+####################################################################################
+ 
+# train lambda on edx train sub set 
+lambdas <- seq(0, 10, 0.25)
+
+# calculate rmse with various values of lambda
+rmses <- sapply(lambdas, function(l){
+  mu <- mean(edx_train$rating) 
+  b_i <- edx_train %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - mu)/(n()+l))
+  b_u <- edx_train %>% 
+    left_join(b_i, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating -mu - b_i)/(n()+l))
+  
+  b_g <- edx_train %>% 
+    left_join(b_i, by='movieId') %>%
+    left_join(b_u, by='userId') %>%
+    group_by(genres) %>%
+    summarize(b_g = sum(rating - mu - b_i-b_u)/(n()+l))
+  
+  predicted_ratings <- edx_test %>% 
+    left_join(b_i, by='movieId') %>%
+    left_join(b_u, by='userId') %>%
+    left_join(b_g, by='genres') %>%
+    mutate(pred = mu + b_i + b_u + b_g) %>%
+    .$pred
+  
+  return(RMSE(edx_test$rating,predicted_ratings))
+})
+
+# plot the rmses  for various lambdas to see the minima
+qplot(lambdas, rmses)  
+
+# chose the lambda which minimizes rmse
+lambda <- lambdas[which.min(rmses)]
+lambda  %>%  knitr::kable(col.names = c("Regularziation lambda"),"simple")
+
+# find the RMSE achieved for chosen lambda
+model_5_rmse <- min(rmses)
+
+# Add model results to the table
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User+ Genres Effects + Regularization Model",  
+                                     RMSE = model_5_rmse ))
+rmse_results  %>%  knitr::kable(col.names = c("Model","RMSE"),"simple")
+
+```
+
+* Before checking the performance on Validation dataset, the final model is now retrained on the entire Training set using the chosen lambda. This because the Training set had been split into further subsets thus far during model development.
+
+```{r Model-5-FullTrainData, echo=FALSE,message=FALSE,warning=FALSE}
+## generate final model with chosen lambda but using full training set i.e. edx set
+
+mu <- mean(edx$rating) 
+b_i <- edx %>%
+  group_by(movieId) %>%
+  summarize(b_i = sum(rating - mu)/(n()+lambda))
+b_u <- edx %>% 
+  left_join(b_i, by="movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u = sum(rating - mu - b_i )/(n()+lambda))
+
+b_g <- edx %>% 
+  left_join(b_i, by='movieId') %>%
+  left_join(b_u, by='userId') %>%
+  group_by(genres) %>%
+  summarize(b_g = sum(rating - mu - b_i-b_u)/(n()+lambda))
+```
+
+# 3. Model Performance with Validation Data Set
+
+* The final model performance is now  tested on the Validation data set, i.e the final hold-out set. 
+* As shown below, the RMSE score achieved is 0.8644514 which is pretty close to what we saw for our final model with training data (which was 0.8649406). 
+
+```{r Final-Model-Performance-ValidationSet, echo=FALSE,message=FALSE,warning=FALSE}
+######################################################################
+# Test final model against validation set or the final hold out set
+######################################################################
+
+# calculate predicted ratings of Validation set using the final model
+predicted_ratings <- validation %>% 
+  left_join(b_i, by='movieId') %>%
+  left_join(b_u, by='userId') %>%
+  left_join(b_g, by='genres') %>%
+  mutate(pred = mu + b_i + b_u + b_g) %>%
+  .$pred
+
+# calculate rmse of final model on Validation set
+final_model_remse_validationset <- RMSE(validation$rating,predicted_ratings)
+
+final_model_remse_validationset %>%  knitr::kable(col.names = c("Final Model RMSE with Validation Set"),"simple")
+
+```
+
+# 4. Conclusion
+
+* The stated objective of building a movie recommendation model is achieved as presented in this report. 
+* The model is built using the movielens dataset by analysing trends in the training data which give insight on what factors affect the rating. The identified factors of movie, user and genre are incrementally incorporated into the final model and regularization technique is used to further enhance the final model. 
+* The final model is tested on validation dataset and the model performance is consistent with what is observed on training data. Infact the performance is found to be slightly better on validation data. 
+
+## 4.1 Limitations and future work
+
+* The model can be improved to predict ratings for a user or movie  which is not present in training data set. 
+* The final proposed model did not include rating frequency even though it was identified as an informative factor during data exploration. This could be analysed further. 
+* Other matrix based machine learning techniques such as Principal component analysis can also be explored to see if they can help build better models.  
